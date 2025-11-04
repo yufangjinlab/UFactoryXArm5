@@ -192,26 +192,6 @@ class RobotMain(object):
         self.move_wherever(x_move, y_move, 0,0,0, 0)
 
 
-    #not being used anymore
-    #def estimate_z_distance_to_object(self, pixel_length, real_width_mm=31.8, focal_length=646.54):
-    #    # focal length = pixel length * known distance / real width. known distance is 137mm here
-    #    if pixel_length <= 0:
-    #        return None
-    #    distance_mm = (real_width_mm * focal_length) / pixel_length
-    #    self.pprint(f"Estimated distance to object: {distance_mm:.1f} mm (pixel length = {pixel_length:.1f}px)")
-    #    time.sleep(1)
-    #    return distance_mm
-
-    #not being used anymore
-    #gets in z-range where focal length: 646.54 is accurate
-    #def get_in_z_range(self, pixel_length):
-    #    z_distance = self.estimate_z_distance_to_object(pixel_length)
-    #    if z_distance >= 138:
-    #        amount = z_distance - 137
-    #        self.pprint(f"Getting in Z range â€” moving down by {amount:.1f} mm")
-    #        self.move_downz(amount)
-    #    time.sleep(1)
-
     def measure_lego_angle(self, contour):
         #Returns: angle in degrees (positive = counter-clockwise from horizontal)
 
@@ -249,10 +229,7 @@ class RobotMain(object):
     def pick_and_place(self, angle_passed, pad_center, pad_angle, pad_pixel_width, frame_center, lego_number):
         self.pprint("Starting pick and place sequence...")
 
-        #NOT PASSING Z_DISTANCE ANYMORE
-        #values between 61 and 64 work best here, depending on vibe
-        # z_distance_between_camera_and_gripper = 62
-        # drop_height = z_distance - z_distance_between_camera_and_gripper
+
 
 
             # Step 3: Move above the landing pad using visual dx/dy
