@@ -8,13 +8,13 @@ import traceback
 from xarm import version
 from xarm.wrapper import XArmAPI
 from movement import Movement
-from vision_control import Vision_control
+import vision_control
 from vision_utils import COLOR_RANGES, get_mask_and_contours
 
 # first connect, i see that this was done at the bottom of the code as well, will review necessity.
-arm = XArmAPI('192.168.1.207', baud_checkset=False)
+#arm = XArmAPI('192.168.1.207', baud_checkset=False)
 # initialize movement
-movement = Movement(arm)
+#movement = Movement(arm)
 
 debugs = 0
 class RobotMain(object):
@@ -24,6 +24,8 @@ class RobotMain(object):
         # REMOVED: self.vision = Vision_control() # <--- NOW CORRECTLY REMOVED
         self._tcp_speed = 50
         self.is_alive = True
+
+
     ## considered removing, believe that x_move=0 may be native to the xarm lib, will do if it is
     def center_x_y_general(self, dx, dy, ratio, angle, adder_1, adder_2, threshold=5):
         if abs(dx) > threshold:
@@ -319,8 +321,8 @@ class RobotMain(object):
                             f"Lego Center 2: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px")
 
                         # CRITICAL FIX: Instantiate Vision_control locally to call its method
-                        vision_temp = Vision_control()
-                        angle_passed = vision_temp.measure_lego_angle(new_contour)
+
+                        angle_passed = vision_control.measure_lego_angle(new_contour)
 
                         cv2.circle(frame, box_center, 5, (0, 0, 255), -1)
                         cv2.putText(frame, f"dx: {dx}px, dy: {dy}px, angle: {angle_passed:.1f} deg", (box_center[0] - 120, box_center[1] + 45),
@@ -347,12 +349,11 @@ class RobotMain(object):
                         # Detect Blue Landing Pad (used as destination)
                         hsv_pad = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                         all_pad_contours = self.get_all_color_contours(hsv_pad)
-                        contours_blue = all_pad_contours.get('blue', [])
+                        frame, contours_blue, _ = vision_control.detect_blue_objects(cap)
 
                         pad_center = None
                         pad_angle = 0
                         pad_pixel_width = 0
-
                         for pad_contour in contours_blue:
                             area=cv2.contourArea(pad_contour)
                             if area > 1500:
@@ -400,4 +401,6 @@ if __name__ == '__main__':
     Movement.pprint('xArm-Python-SDK Version:{}'.format(version.__version__)) # FIX: Call Movement.pprint
     arm = XArmAPI('192.168.1.207', baud_checkset=False)
     robot_main = RobotMain(arm)
+
+    movement = Movement(arm)
     robot_main.run()
