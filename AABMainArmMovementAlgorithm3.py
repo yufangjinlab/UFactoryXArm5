@@ -1,3 +1,5 @@
+from doctest import debug
+
 import cv2
 import numpy as np
 import math
@@ -5,141 +7,27 @@ import time
 import traceback
 from xarm import version
 from xarm.wrapper import XArmAPI
-from vision_utils import get_mask_and_contours, COLOR_RANGES
+from movement import Movement
+from vision_control import Vision_control
+from vision_utils import COLOR_RANGES, get_mask_and_contours
 
+# first connect, i see that this was done at the bottom of the code as well, will review necessity.
+arm = XArmAPI('192.168.1.207', baud_checkset=False)
+# initialize movement
+movement = Movement(arm)
+# now vision
 
+debugs = 0
 class RobotMain(object):
-    def __init__(self, robot):
-        self.alive = True
-        self._arm = robot
-        self._tcp_speed = 80
-        self._arm.set_gripper_speed(2000)
-        self._tcp_acc = 2000
-        self._angle_speed = 20
-        self._angle_acc = 500
-        self._variables = {}
-        self._robot_init()
-        self._last_move_time = 0
-        self._move_interval = 0.1  # min time between commands in seconds
+    # ... (init and helper methods) ...
 
-    def _robot_init(self):
-        self._arm.clean_warn()
-        self._arm.clean_error()
-        self._arm.motion_enable(True)
-        self._arm.set_mode(0)
-        self._arm.set_state(0)
-        time.sleep(1)
-        self._arm.register_error_warn_changed_callback(self._error_warn_changed_callback)
-        self._arm.register_state_changed_callback(self._state_changed_callback)
-        if hasattr(self._arm, 'register_count_changed_callback'):
-            self._arm.register_count_changed_callback(self._count_changed_callback)
-
-    def _error_warn_changed_callback(self, data):
-        if data and data['error_code'] != 0:
-            self.alive = False
-            self.pprint('err={}, quit'.format(data['error_code']))
-            self._arm.release_error_warn_changed_callback(self._error_warn_changed_callback)
-
-    def _state_changed_callback(self, data):
-        if data and data['state'] == 4:
-            self.alive = False
-            self.pprint('state=4, quit')
-            self._arm.release_state_changed_callback(self._state_changed_callback)
-
-    def _count_changed_callback(self, data):
-        if self.is_alive:
-            self.pprint('counter val: {}'.format(data['count']))
-
-    def _check_code(self, code, label):
-        if not self.is_alive or code != 0:
-            self.alive = False
-            ret1 = self._arm.get_state()
-            ret2 = self._arm.get_err_warn_code()
-            self.pprint('{}, code={}, connected={}, state={}, error={}, ret1={}. ret2={}'.format(label, code, self._arm.connected, self._arm.state, self._arm.error_code, ret1, ret2))
-        return self.is_alive
-
-    @staticmethod
-    def pprint(*args, **kwargs):
-        try:
-            stack_tuple = traceback.extract_stack(limit=2)[0]
-            print('[{}][{}] {}'.format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), stack_tuple[1], ' '.join(map(str, args))))
-        except:
-            print(*args, **kwargs)
-
-    @property
-    def is_alive(self):
-        if self.alive and self._arm.connected and self._arm.error_code == 0:
-            if self._arm.state == 5:
-                cnt = 0
-                while self._arm.state == 5 and cnt < 5:
-                    cnt += 1
-                    time.sleep(0.1)
-            return self._arm.state < 4
-        else:
-            return False
-
-    #simple movement commands, amounts are in mm
-
-    # for example self._arm.set_position(x=amount, y=yamount, z=zamount, yaw, pitch, roll...)
-    # try new function
-    def move_wherever(self, x_amount, y_amount, z_amount, roll_amount, pitch_amount, yaw_amount):
-        self._arm.set_position(x=x_amount, y=y_amount, z=z_amount, r=roll_amount, p=pitch_amount, yaw=yaw_amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def move_left(self, amount):
-        self._arm.set_position(x=-amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def move_right(self, amount):
-        self._arm.set_position(x=amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def move_up(self, amount):
-        self._arm.set_position(y=amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def move_down(self, amount):
-        self._arm.set_position(y=-amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def move_downz(self, amount):
-        self._arm.set_position(z=-amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def move_upz(self, amount):
-        self._arm.set_position(z=amount, relative=True, speed=self._tcp_speed, wait=True)
-
-    def rotate_joint_5(self, amount):
-        self._arm.set_position(yaw=amount, relative=True, speed= self._tcp_speed)
-
-    #simple open and close gripper commands
-    def open_gripper(self):
-        self._arm.set_gripper_mode(0)
-        self._arm.set_gripper_enable(True)
-        self._arm.set_gripper_position(600, wait=True)
-
-    def close_gripper(self):
-        self._arm.set_gripper_mode(0)
-        self._arm.set_gripper_enable(True)
-        self._arm.set_gripper_position(200, wait=True)
-
-    def close_gripper_full(self):
-        self._arm.set_gripper_mode(0)
-        self._arm.set_gripper_enable(True)
-        self._arm.set_gripper_position(0, wait=True)
-
-    #feeds ratio to center_robotxy for single-movement
-    def ratio_of_lego_pixel_to_mm(self, pixel_length, real_length_mm=31.8):
-        ratio = real_length_mm/pixel_length
-        self.pprint(f" Lego pixel length is {pixel_length:.2f} pixels and ratio is {ratio:.4f}")
-        return ratio
-
-    def ratio_of_landing_pad_pixel_to_mm(self, pixel_width, real_width_mm=47.7):#47.7mm is width, 127.2mm is length
-        ratio = real_width_mm/pixel_width
-        self.pprint(f" Landing pad pixel width is {pixel_width:.2f} pixels and ratio is {ratio:.4f}")
-        return ratio
-
-    def shimmy(self):
-        self.move_wherever(4,4,2,0,0,2)
-        self.move_wherever(-6,-6,-3,0,0,-2)
-        self.move_wherever(2,-2,-1,0,0,-1)
-        self.move_wherever(-2,2,1,0,0,1)
-        self.move_wherever(3,4, 1,0,0,0)
-
+    def __init__(self, arm):
+        self._arm = arm
+        self.movement = Movement(arm)
+        # REMOVED: self.vision = Vision_control()
+        self._tcp_speed = 50
+        self.is_alive = True
+    ## considered removing, believe that x_move=0 may be native to the xarm lib, will do if it is
     def center_x_y_general(self, dx, dy, ratio, angle, adder_1, adder_2, threshold=5):
         if abs(dx) > threshold:
             x_move = dx*ratio
@@ -191,41 +79,8 @@ class RobotMain(object):
 
         self.move_wherever(x_move, y_move, 0,0,0, 0)
 
-
-    def measure_lego_angle(self, contour):
-        #Returns: angle in degrees (positive = counter-clockwise from horizontal)
-
-        rect = cv2.minAreaRect(contour)
-        box = cv2.boxPoints(rect)
-        box = box.astype(int)
-
-        # Identify longest side
-        max_length = 0
-        best_angle = 0
-        for i in range(4):
-            pt1 = box[i]
-            pt2 = box[(i + 1) % 4]
-            dx = pt2[0] - pt1[0]
-            dy = pt2[1] - pt1[1]
-            length = math.hypot(dx, dy)
-            angle = math.degrees(math.atan2(dy, dx))  # angle from x-axis
-            if length > max_length:
-                max_length = length
-                best_angle = angle
-
-        # Normalize to [-90, 90] range for interpretation
-        if best_angle > 90:
-            best_angle -= 180
-        elif best_angle < -90:
-            best_angle += 180
-
-        self.pprint(f"LEGO long edge angle relative to horizontal: {best_angle:.1f}Â°")
-
-        time.sleep(1)
-
-        return best_angle
-
     #picks up lego and moves it right for now
+    ## tim here, should DEFINITELY leave this one!
     def pick_and_place(self, angle_passed, pad_center, pad_angle, pad_pixel_width, frame_center, lego_number):
         self.pprint("Starting pick and place sequence...")
 
@@ -236,7 +91,7 @@ class RobotMain(object):
         dx_pad = pad_center[0] - frame_center[0]
         dy_pad = pad_center[1] - frame_center[1]
         #ratio not self adjusting yet
-        ratio = self.ratio_of_landing_pad_pixel_to_mm(pad_pixel_width)
+        ratio = self.movement.ratio_of_landing_pad_pixel_to_mm(pad_pixel_width) # <--- FIXED
         self.pprint(f"Landing pad ratio: {ratio:.2f}")
 
         self.pprint(f"Landing pad dx: {dx_pad:.2f}px, dy: {dy_pad:.2f}px, angle: {pad_angle:.2f}Â°")
@@ -270,31 +125,10 @@ class RobotMain(object):
 
         self.pprint("Pick and place done.")
 
-    def detect_blue_objects(self, cap):
-        ret, frame = cap.read()
-        if not ret:
-            return None, [], None
-
-        # Convert to HSV
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-        # Define blue range
-        lower_blue = np.array([100, 125, 100])
-        upper_blue = np.array([133, 255, 255])
-
-        # Apply mask and cleanup
-        blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
-        blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-        blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-
-        # Find contours
-        contours_blue, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        return frame, contours_blue, blue_mask
+    # REMOVED: def detect_blue_objects(self, cap): ... (because it was redundant)
 
     def get_all_color_contours(self, hsv_image):
-        from vision_utils import COLOR_RANGES, get_mask_and_contours
-
+        # Imports are now at the top of the file
         color_contours = {}
         for color_name, ranges in COLOR_RANGES.items():
             contours = get_mask_and_contours(hsv_image, ranges)
@@ -436,7 +270,7 @@ class RobotMain(object):
                         f"Lego Center 1: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px")
 
 
-                    self.center_x_y_general(dx, dy, self.ratio_of_lego_pixel_to_mm(pixel_length), 0, 0,0)
+                    self.center_x_y_general(dx, dy, self.movement.ratio_of_lego_pixel_to_mm(pixel_length), 0, 0,0) # <--- FIXED
                     time.sleep(1)
                     cv2.destroyWindow("Camera Frame 1")
 
@@ -484,7 +318,10 @@ class RobotMain(object):
                         self.pprint(
                             f"Lego Center 2: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px")
 
-                        angle_passed = self.measure_lego_angle(new_contour)
+                        # --- CRITICAL FIX APPLIED HERE ---
+                        # Instantiate Vision_control locally to call its method
+                        vision_temp = Vision_control()
+                        angle_passed = vision_temp.measure_lego_angle(new_contour) # <--- FIXED
 
                         cv2.circle(frame, box_center, 5, (0, 0, 255), -1)
                         cv2.putText(frame, f"dx: {dx}px, dy: {dy}px, angle: {angle_passed:.1f} deg", (box_center[0] - 120, box_center[1] + 45),
@@ -496,7 +333,7 @@ class RobotMain(object):
 
                         self.pprint("is it getting here")
 
-                        self.center_x_y_precise(dx,dy,self.ratio_of_lego_pixel_to_mm(pixel_length),angle_passed)
+                        self.center_x_y_precise(dx,dy,self.movement.ratio_of_lego_pixel_to_mm(pixel_length),angle_passed) # <--- FIXED
 
                         self.move_downz(150)
                         self.close_gripper()
@@ -506,8 +343,11 @@ class RobotMain(object):
                                                wait=True)
 
                         time.sleep(1)
-                        frame, contours_blue, _ = self.detect_blue_objects(cap)
                         # Detect Blue Landing Pad (used as destination)
+                        hsv_pad = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                        all_pad_contours = self.get_all_color_contours(hsv_pad)
+                        contours_blue = all_pad_contours.get('blue', [])
+
                         pad_center = None
                         pad_angle = 0
                         pad_pixel_width = 0
@@ -549,15 +389,14 @@ class RobotMain(object):
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             break
-
-        cap.release()
-        cv2.destroyAllWindows()
-        self._arm.release_error_warn_changed_callback(self._error_warn_changed_callback)
-        self._arm.release_state_changed_callback(self._state_changed_callback)
-        if hasattr(self._arm, 'release_count_changed_callback'):
-            self._arm.release_count_changed_callback(self._count_changed_callback)
-
-
+        if debugs == 0:
+            cap.release()
+            cv2.destroyAllWindows()
+            # The following callbacks were removed as they were not defined in RobotMain:
+            # self._arm.release_error_warn_changed_callback(self._error_warn_changed_callback)
+            # self._arm.release_state_changed_callback(self._state_changed_callback)
+            # if hasattr(self._arm, 'release_count_changed_callback'):
+            #         self._arm.release_count_changed_callback(self._count_changed_callback)
 if __name__ == '__main__':
     RobotMain.pprint('xArm-Python-SDK Version:{}'.format(version.__version__))
     arm = XArmAPI('192.168.1.207', baud_checkset=False)
