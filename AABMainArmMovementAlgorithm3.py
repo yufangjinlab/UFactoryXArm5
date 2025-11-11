@@ -238,15 +238,63 @@ class RobotMain(object):
         cv2.destroyWindow("Camera Frame 1")
         return True
 
+
+    # This function is the centering function for the pad placement, returns placement information for pick_and_place, 'None' if the function fails
+    # This function will be made more sophisticated such that it is less dependent on vision angle
+    # Other functions will need to be improved before this can take effect, however
+    def center_on_pad(self, cap, lego_number, angle_passed, frame_center):
+        self._arm.set_position(x=206, y=135.8, z=503.9, roll=180, pitch=0, yaw=-88.1, speed=self._tcp_speed,
+                               wait=True)
+
+        time.sleep(1)
+        frame, contours_blue, _ = vision_control.detect_blue_objects(cap)
+        # Detect Blue Landing Pad (used as destination)
+        pad_center = None
+        pad_angle = 0
+        pad_pixel_width = 0
+
+        for pad_contour in contours_blue:
+            area = cv2.contourArea(pad_contour)
+            if area > 1500:
+                rect_pad = cv2.minAreaRect(pad_contour)
+                (pad_x, pad_y), (w_pad, h_pad), pad_angle = rect_pad
+                pad_center = (pad_x, pad_y)
+                pad_pixel_width = min(w_pad, h_pad)
+                # self.center_x_y_precise(pad_x, pad_y, movement.ratio_of_lego_pixel_to_mm(pad_pixel_width),
+                #                       pad_angle)
+                vision_control.pprint(
+                    f"Landing pad center: ({pad_center[0]:.2f}, {pad_center[1]:.2f}), angle: {pad_angle:.2f}, pixel length: {pad_pixel_width:.2f}")
+                box_pad = cv2.boxPoints(rect_pad)
+                box_pad = box_pad.astype(int)
+                cv2.drawContours(frame, [box_pad], 0, (255, 0, 0), 2)
+                cv2.circle(frame, (int(pad_x), int(pad_y)), 5, (255, 0, 255), -1)
+
+                cv2.imshow("Landing Pad", frame)
+                cv2.waitKey(1)
+                time.sleep(1)
+                # self.center_x_y_general()
+                break  # only use first large one found
+
+        lego_number += 1
+        vision_control.pprint(f"Lego number: {lego_number}")
+
+        if pad_center:
+            return pad_center, pad_angle, pad_pixel_width
+        else:
+            vision_control.pprint("No landing pad found â€” skipping placement.")
+            return None
+
     def search_colors(self, color_contours, cap, frame, frame_center, lego_number):
         for color_name, contours in color_contours.items():
             for contour in contours:
                 if cv2.contourArea(contour) < 500 or cv2.contourArea(contour) > 1000:
                     continue
+
+                # Sets the arm to picture taking position.  Does not take picture here.
                 self._arm.set_position(x=-72.9, y=259.5, z=603.9, roll=180, pitch=0, yaw=-88.1,
                                        speed=self._tcp_speed, wait=True)
 
-                # Finds rough location of present lego
+                # Finds rough location of current lego
                 found_brick = self.find_lego(color_name, contour, frame, frame_center)
 
                 self.run_precise(cap, color_name)
@@ -309,48 +357,15 @@ class RobotMain(object):
                     movement.move_downz(150)
                     movement.close_gripper()
 
-                    self._arm.set_position(x=206, y=135.8, z=503.9, roll=180, pitch=0, yaw=-88.1, speed=self._tcp_speed,
-                                           wait=True)
+                    # saves pick_and_place location information based on center on pad
+                    pad_center, pad_angle, pad_pixel_width = self.center_on_pad(cap, lego_number, angle_passed, frame_center)
 
-                    time.sleep(1)
-                    frame, contours_blue, _ = vision_control.detect_blue_objects(cap)
-                    # Detect Blue Landing Pad (used as destination)
-                    pad_center = None
-                    pad_angle = 0
-                    pad_pixel_width = 0
-
-                    for pad_contour in contours_blue:
-                        area = cv2.contourArea(pad_contour)
-                        if area > 1500:
-                            rect_pad = cv2.minAreaRect(pad_contour)
-                            (pad_x, pad_y), (w_pad, h_pad), pad_angle = rect_pad
-                            pad_center = (pad_x, pad_y)
-                            pad_pixel_width = min(w_pad, h_pad)
-                            #self.center_x_y_precise(pad_x, pad_y, movement.ratio_of_lego_pixel_to_mm(pad_pixel_width),
-                            #                       pad_angle)
-                            vision_control.pprint(
-                                f"Landing pad center: ({pad_center[0]:.2f}, {pad_center[1]:.2f}), angle: {pad_angle:.2f}, pixel length: {pad_pixel_width:.2f}")
-                            box_pad = cv2.boxPoints(rect_pad)
-                            box_pad = box_pad.astype(int)
-                            cv2.drawContours(frame, [box_pad], 0, (255, 0, 0), 2)
-                            cv2.circle(frame, (int(pad_x), int(pad_y)), 5, (255, 0, 255), -1)
-
-                            cv2.imshow("Landing Pad", frame)
-                            cv2.waitKey(1)
-                            time.sleep(1)
-                            # self.center_x_y_general()
-                            break  # only use first large one found
-
-                    lego_number += 1
-                    vision_control.pprint(f"Lego number: {lego_number}")
-
-                    if pad_center:
+                    # If center_on_pad found a location, pick_and_place is called to actually place down the lego
+                    if (pad_center, pad_angle, pad_pixel_width):
                         self.pick_and_place(angle_passed, pad_center, pad_angle, pad_pixel_width, frame_center,
-                                            lego_number)
-                    else:
-                        vision_control.pprint("No landing pad found â€” skipping placement.")
-
+                                        lego_number)
                     break
+
                 break
 
     def run(self):
