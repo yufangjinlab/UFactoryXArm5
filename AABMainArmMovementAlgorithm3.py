@@ -83,7 +83,7 @@ class RobotMain(object):
 
     #picks up lego and moves it right for now
     ## tim here, should DEFINITELY leave this one!
-    def pick_and_place(self, angle_passed, pad_center, pad_angle, pad_pixel_width, frame_center, lego_number):
+    def pick_and_place(self, pad_center, pad_angle, pad_pixel_width, frame_center, lego_number):
         Movement.pprint("Starting pick and place sequence...") # FIX: Call Movement.pprint
 
         # Step 3: Move above the landing pad using visual dx/dy
@@ -138,7 +138,41 @@ class RobotMain(object):
 
         return color_contours
 
-    def run_precise(self, cap, target_color):
+    # This function centers precisely on the contour, bringing down disparity between the centers of the contour and camera as low as possible
+    def dynamic_center(self, contour, frame, frame_center):
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect).astype(int)
+        cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
+
+        (center_x, center_y), (w, h), angle = rect
+        box_center = (int(center_x), int(center_y))
+        dx = box_center[0] - frame_center[0]
+        dy = box_center[1] - frame_center[1]
+
+        pixel_length = max(w, h)
+        pixel_width = min(w, h)
+
+        Movement.pprint(  # FIX: Call Movement.pprint
+            f"(Precision) Lego Center: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px"
+        )
+
+        # Draw visuals
+        cv2.circle(frame, box_center, 5, (0, 0, 255), -1)
+        cv2.putText(frame, f"dx: {dx}px, dy: {dy}px", (box_center[0] - 60, box_center[1] + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        cv2.circle(frame, frame_center, 5, (255, 255, 255), -1)
+        cv2.imshow("Camera Frame Precision", frame)
+        cv2.waitKey(1)
+
+        if abs(dx) > 1 or abs(dy) > 1:
+            self.center_x_y_old(dx, dy)
+            Movement.pprint("ran")  # FIX: Call Movement.pprint
+        else:
+            Movement.pprint("dx and dy small enough â€” exiting.")  # FIX: Call Movement.pprint
+            cv2.destroyWindow("Camera Frame Precision")
+            return True
+
+    def run_precise(self, cap):
         if not cap.isOpened():
             Movement.pprint("Error: Could not open camera.") # FIX: Call Movement.pprint
             return
@@ -165,40 +199,11 @@ class RobotMain(object):
                         if cv2.contourArea(contour) < 500:
                             continue
 
-                        rect = cv2.minAreaRect(contour)
-                        box = cv2.boxPoints(rect).astype(int)
-                        cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
-
-                        (center_x, center_y), (w, h), angle = rect
-                        box_center = (int(center_x), int(center_y))
-                        dx = box_center[0] - frame_center[0]
-                        dy = box_center[1] - frame_center[1]
-
-                        pixel_length = max(w, h)
-                        pixel_width = min(w, h)
-
-                        Movement.pprint( # FIX: Call Movement.pprint
-                            f"(Precision) Lego Center: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px"
-                        )
-
-                        # Draw visuals
-                        cv2.circle(frame, box_center, 5, (0, 0, 255), -1)
-                        cv2.putText(frame, f"dx: {dx}px, dy: {dy}px", (box_center[0] - 60, box_center[1] + 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-                        cv2.circle(frame, frame_center, 5, (255, 255, 255), -1)
-                        cv2.imshow("Camera Frame Precision", frame)
-                        cv2.waitKey(1)
-
-                        found_valid_contour = True
-
-                        if abs(dx) > 1 or abs(dy) > 1:
-                            self.center_x_y_old(dx, dy)
-                            Movement.pprint("ran") # FIX: Call Movement.pprint
-                        else:
-                            Movement.pprint("dx and dy small enough â€” exiting.") # FIX: Call Movement.pprint
-                            cv2.destroyWindow("Camera Frame Precision")
+                        movement.pprint("calling dynamic center")
+                        if self.dynamic_center(contour, frame, frame_center):
                             return
 
+                        found_valid_contour = True
                         break  # only process one contour at a time
                     if found_valid_contour:
                         break
@@ -242,7 +247,7 @@ class RobotMain(object):
     # This function is the centering function for the pad placement, returns placement information for pick_and_place, 'None' if the function fails
     # This function will be made more sophisticated such that it is less dependent on vision angle
     # Other functions will need to be improved before this can take effect, however
-    def center_on_pad(self, cap, lego_number, angle_passed, frame_center):
+    def center_on_pad(self, cap):
         self._arm.set_position(x=206, y=135.8, z=503.9, roll=180, pitch=0, yaw=-88.1, speed=self._tcp_speed,
                                wait=True)
 
@@ -275,9 +280,6 @@ class RobotMain(object):
                 # self.center_x_y_general()
                 break  # only use first large one found
 
-        lego_number += 1
-        vision_control.pprint(f"Lego number: {lego_number}")
-
         if pad_center:
             return pad_center, pad_angle, pad_pixel_width
         else:
@@ -297,7 +299,7 @@ class RobotMain(object):
                 # Finds rough location of current lego
                 found_brick = self.find_lego(color_name, contour, frame, frame_center)
 
-                self.run_precise(cap, color_name)
+                self.run_precise(cap)
                 time.sleep(1)
                 vision_control.pprint("Ran self.run_precise()")
 
@@ -357,12 +359,15 @@ class RobotMain(object):
                     movement.move_downz(150)
                     movement.close_gripper()
 
+                    movement.pprint("Starting center on pad")
                     # saves pick_and_place location information based on center on pad
-                    pad_center, pad_angle, pad_pixel_width = self.center_on_pad(cap, lego_number, angle_passed, frame_center)
-
+                    pad_center, pad_angle, pad_pixel_width = self.center_on_pad(cap)
+                    movement.pprint("Finished center on pad")
                     # If center_on_pad found a location, pick_and_place is called to actually place down the lego
                     if (pad_center, pad_angle, pad_pixel_width):
-                        self.pick_and_place(angle_passed, pad_center, pad_angle, pad_pixel_width, frame_center,
+                        lego_number += 1
+                        vision_control.pprint(f"Lego number: {lego_number}")
+                        self.pick_and_place(pad_center, pad_angle, pad_pixel_width, frame_center,
                                         lego_number)
                     break
 
