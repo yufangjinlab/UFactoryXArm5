@@ -62,3 +62,24 @@ def detect_blue_objects(cap):
     contours_blue, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     return frame, contours_blue, blue_mask
+
+# This function returns the frame center array
+def get_frame_center(frame):
+    height, width = frame.shape[:2]
+    frame_center = (width // 2, height // 2)
+    return frame_center
+
+# This function unpacks rect values so that they can be used for movement code
+def unpack_rect(contour, frame):
+    # Uses a rect to find box size and location
+    rect = cv2.minAreaRect(contour)
+    box = cv2.boxPoints(rect).astype(int)
+    cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
+
+    # Unpacks rect information for use in centering
+    (center_x, center_y), (w, h), angle = rect
+    box_center = (int(center_x), int(center_y))
+    frame_center = get_frame_center(frame)
+    dx = box_center[0] - frame_center[0]
+    dy = box_center[1] - frame_center[1]
+    return box_center, dx, dy, w, h, angle
