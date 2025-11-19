@@ -83,7 +83,13 @@ class RobotMain(object):
         self.movement.move_wherever(x_move, y_move, 0,0,0, 0)
 
     # This function centers precisely on the contour, bringing down disparity between the centers of the contour and camera as low as possible
-    def dynamic_center_increment(self, contour, frame):
+    def dynamic_center_increment(self, contour, cap):
+        # Uses the frame from the current position to identify the location of the lego
+        if not cap.isOpened():
+            Movement.pprint("Error: Could not open camera.")
+            return
+        _, frame = cap.read()
+
         # Unpacks the rect values for later use
         box_center, dx, dy, w, h, _ = vision_control.unpack_rect(contour, frame)
 
@@ -192,7 +198,7 @@ class RobotMain(object):
                         continue
                     # This check runs the incremented centering function and uses the returned value to decide to continue looping or to return
                     movement.pprint("Calling dynamic center")
-                    if self.dynamic_center_increment(contour, frame):
+                    if self.dynamic_center_increment(contour, cap):
                         return
 
                     # This loops breaks so that only 1 lego is centered on, and since a lego was found, we hold on to that value
@@ -209,37 +215,45 @@ class RobotMain(object):
         cv2.destroyWindow("Camera Frame Precision")
 
     def center_grabber(self, cap, color_name, orientation, lego_length):
+        # Opens the camera and gets frame information
         ret, frame = cap.read()
         if not ret:
             vision_control.pprint("Failed to grab frame after run_precise().")
             return
-
         frame_center = vision_control.get_frame_center(frame)
 
+        # Gets contour information from the frame
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         color_contours = self.get_all_color_contours(hsv)
         vision_control.pprint(color_name)
+
+        # Searches the contours in the list of contours of the given color
         for new_contour in color_contours[color_name]:
+            # Disregards contours that are too small
             if cv2.contourArea(new_contour) < 500:
                 continue
 
+            # Unpacks rect information
             box_center, dx, dy, w, h, _ = vision_control.unpack_rect(new_contour, frame)
-
             # Sort dimensions
             pixel_length = max(w, h)
             pixel_width = min(w, h)
 
-
+            # Prints out lego location information
             vision_control.pprint(
                 f"Lego Center 2: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px")
 
+            # Detects the angle of the contour so it can be grabbed
             angle_passed = vision_control.measure_lego_angle(new_contour)
+
+            # If the orientation of the grabber is short ways, it will modify the angle such that is places the lego in the correct orientation
             if orientation == "short-ways":
                 if angle_passed < 0:
                     angle_passed += 90
                 else:
                     angle_passed -= 90
 
+            # Displays movement information on the screen so it can be identified
             cv2.circle(frame, box_center, 5, (0, 0, 255), -1)
             cv2.putText(frame, f"dx: {dx}px, dy: {dy}px, angle: {angle_passed:.1f} deg",
                         (box_center[0] - 120, box_center[1] + 45),
@@ -249,12 +263,18 @@ class RobotMain(object):
             cv2.imshow("Camera Frame 2", frame)
             cv2.waitKey(1)
 
-            vision_control.pprint("is it getting here")
-
+            # Relocates the grabber in position based on lego location information found earlier, then returns so only one lego is centered on
             self.center_x_y_precise(dx, dy, movement.ratio_of_lego_pixel_to_mm(pixel_length, lego_length), angle_passed)
+            return
 
     # This function places the camera above the lego that it is going to place next
-    def find_lego(self, contour, frame):
+    def find_lego(self, contour, cap):
+        # Uses the camera to identify the lego position
+        if not cap.isOpened():
+            Movement.pprint("Error: Could not open camera.")
+            return
+        _, frame = cap.read()
+
         # Adds a circle to the frame at the center of the picture
         frame_center = vision_control.get_frame_center(frame)
         cv2.circle(frame, frame_center, 5, (255, 255, 255), -1)
@@ -287,15 +307,20 @@ class RobotMain(object):
         # Detect Blue Landing Pad (used as destination)
         time.sleep(1)
         frame, contours_blue, _ = vision_control.detect_blue_objects(cap)
+
+        # Save position information so it can be displayed at the end
         pad_pixel_width = 0
         pad_contour = None
+        dx_pad = 0
+        dy_pad = 0
+        pad_angle = 0
 
         # This loops looks through the blue contours to find the pad. Only the pad contour is used
         for contour in contours_blue:
             area = cv2.contourArea(contour)
             if area > 1500:
                 # Takes position information from the contour rect and draws boxes
-                pad_center, _, _, _, _, pad_angle = vision_control.unpack_rect(contour, frame)
+                pad_center, dx_pad, dy_pad, _, _, pad_angle = vision_control.unpack_rect(contour, frame)
                 pad_contour = contour
 
                 # Prints pad location information
@@ -309,46 +334,38 @@ class RobotMain(object):
                 # Only uses the first large contour found
                 break
 
-        Movement.pprint("Starting pick and place sequence...")  # FIX: Call Movement.pprint
-
-        (pad_x, pad_y), (w_pad, h_pad), pad_angle = cv2.minAreaRect(pad_contour)
-        pad_center = (pad_x, pad_y)
-        pad_pixel_width = min(w_pad, h_pad)
-
-        _, frame = cap.read()
-        height, width = frame.shape[:2]
-        frame_center = (width // 2, height // 2)
-
-        # Step 3: Move above the landing pad using visual dx/dy
-        dx_pad = pad_center[0] - frame_center[0]
-        dy_pad = pad_center[1] - frame_center[1]
-        # ratio not self adjusting yet
-        # FIX: Call ratio function on movement instance
-        ratio = movement.ratio_of_landing_pad_pixel_to_mm(pad_pixel_width)
-        Movement.pprint(f"Landing pad ratio: {ratio:.2f}")  # FIX: Call Movement.pprint
-
+        # Prints landing pad location information
         Movement.pprint(
-            f"Landing pad dx: {dx_pad:.2f}px, dy: {dy_pad:.2f}px, angle: {pad_angle:.2f}Â°")  # FIX: Call Movement.pprint
+            f"Landing pad dx: {dx_pad:.2f}px, dy: {dy_pad:.2f}px, angle: {pad_angle:.2f}Â°")
 
-        # if abs(dx_pad) > 5 or abs(dy_pad) > 5 or abs(pad_angle) > 5:
-        #    if pad_angle < 45: # This occurs when the pad is pointing away from the robot, to ensure the lego is placed horizontally
-        #        self.center_x_y_general(dx_pad, dy_pad, ratio, pad_angle, 50,100)
-        #    else: # This occurs when the pad is pointing toward the robot. Otherwise, the centering function does so vertically
-        #        self.center_x_y_general(dx_pad, dy_pad, ratio, pad_angle-90, 50, 100)
-        #    Movement.pprint("moved to landing pad ayyyy") # FIX: Call Movement.pprint
-
+        # Centers the camera over the landing pad and then places the grabber in position
         self.run_precise(cap, "blue")
         self.center_grabber(cap, "blue", "short-ways", 47.7)
 
-        if pad_center:
+        # If the pad could be found, return True, otherwise, return False
+        if pad_contour.any():
             return True
         else:
             vision_control.pprint("No landing pad found â€” skipping placement.")
-            return None
+            return False
 
-    def search_colors(self, color_contours, cap, frame, lego_number):
+    def place_all_legos(self, cap):
+        # Reads the frame and formats it to find contours
+        ret, frame = cap.read()
+        if not ret:
+            return
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Finds a list of all the contours in the frame
+        color_contours = self.get_all_color_contours(hsv)
+
+        # Initializes the legos at zero so that heights can be adjusted
+        lego_number = 0
+
+        # Loops through each color and uses the contours to place the legos
         for color_name, contours in color_contours.items():
             for contour in contours:
+                # Ignores contours that are too large or too small to be legos
                 if cv2.contourArea(contour) < 500 or cv2.contourArea(contour) > 1000:
                     continue
 
@@ -356,9 +373,8 @@ class RobotMain(object):
                 self._arm.set_position(x=-72.9, y=259.5, z=603.9, roll=180, pitch=0, yaw=-88.1,
                                        speed=self._tcp_speed, wait=True)
 
-                # Finds rough location of current lego
-                found_brick = self.find_lego(contour, frame)
-
+                # Finds rough location of current lego and then centers on it
+                found_lego = self.find_lego(contour, cap)
                 self.run_precise(cap, color_name)
                 time.sleep(1)
                 vision_control.pprint("Ran self.run_precise()")
@@ -368,57 +384,38 @@ class RobotMain(object):
                     cap.read()
                     time.sleep(0.05)
 
+                # Centers the grabber over the lego where the camera was, oriented long-ways, then grabs the lego
                 self.center_grabber(cap, color_name, "long-ways", 31.8)
-
                 movement.move_downz(150)
                 movement.close_gripper()
 
-                # saves pick_and_place contour information based on center on pad
+                # Saves whether the grabber was successfully centered on the pad
                 pad_centered = self.center_on_pad(cap)
 
-                # If center_on_pad found a location, pick_and_place is called to actually place down the lego
+                # If the pad was successfully centered on, place_lego is called to actually place down the lego
                 if pad_centered:
                     lego_number += 1
                     vision_control.pprint(f"Lego number: {lego_number}")
                     self.place_lego(lego_number)
-                break
 
     def run(self):
         # z absolute distance to picking up range is 203.9mm
         self._arm.set_position(x=-72.9, y=259.5, z=603.9, roll=180, pitch=0, yaw=-88.1, speed=self._tcp_speed,
                                wait=True)
         movement.open_gripper()
-        # camera is set to 640x480 pixels by default
+        # Initializes camera is set to 640x480 pixels by default
         cap = cv2.VideoCapture(0)
+
+        # Closes program if camera is not functional
         if not cap.isOpened():
             vision_control.pprint("Error: Could not open camera.")
             return
-
         vision_control.pprint("Camera started. Press 'q' to quit.")
 
-        lego_number = 0
+        # Goes through all the legos and places them in the tower
+        self.place_all_legos(cap)
 
-        while self.is_alive:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            height, width = frame.shape[:2]
-            frame_center = (width // 2, height // 2)
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-            color_contours = self.get_all_color_contours(hsv)
-            found_brick = False
-
-            vision_control.pprint("searching all of the contours")
-
-            # New function that searches through the color contours and builds the tower
-            self.search_colors(color_contours, cap, frame, lego_number)
-
-            ##if cv2.waitKey(1) & 0xFF == ord('q'):
-              ##  break
-            break
-
+        # Cleanup that removes the camera, destroys windows, and prepares the robot
         cap.release()
         cv2.destroyAllWindows()
         self._arm.release_error_warn_changed_callback(movement._error_warn_changed_callback)
