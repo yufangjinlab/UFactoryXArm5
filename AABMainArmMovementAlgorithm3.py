@@ -49,12 +49,12 @@ class RobotMain(object):
     # Moves the camera a decided amount based on pixel to mm ratio, and moves the grabber to previous camera location
     def center_x_y_precise(self, dx, dy, ratio, angle, threshold=2):
         if abs(dx) > threshold:
-            x_move = dx*ratio
+            x_move = dx*ratio + math.cos(abs(angle)) * ratio
         else:
             x_move = 0
 
         if abs(dy) > threshold:
-            y_move = -dy*ratio
+            y_move = -dy*ratio + math.sin(abs(angle)) * ratio
         else:
             y_move = 0
 
@@ -63,8 +63,9 @@ class RobotMain(object):
         else:
             yaw_move = 0
 
-        # FIX: Call on movement instance
-        self.movement.move_wherever(x_move+6, y_move+53, 0,0,0, yaw_move)
+
+
+        self.movement.move_wherever(x_move+5, y_move+54, 0,0,0, yaw_move)
         time.sleep(0.5)
 
     # Moves the camera a small amount in the given direction based on pixel length only
@@ -122,9 +123,15 @@ class RobotMain(object):
             return True
 
     # Places the lego on the landing pad in the center of the pad.
-    def place_lego(self, lego_number):
+    def place_lego(self, cap, lego_number):
         # Identifies the additional height needed to place the lego in the correct spot
-        height_added_to_z = 21 + (lego_number - 1) * 10  # was 18 and 9.6mm
+        height_added_to_z = 21 + (lego_number - 1) * 9.6  # was 18 and 9.6mm
+
+        # Centers the grabber over the landing pad
+        if lego_number % 2 == 1:
+            self.center_grabber(cap, "blue", "short-ways", 47.7)
+        else:
+            self.center_grabber(cap, "blue", "long-ways", 47.7)
 
         # Lowers the grabber over the pad and slows down the robot
         self._arm.set_position(z=253.9 + height_added_to_z, speed=self._tcp_speed, wait=True)
@@ -214,6 +221,7 @@ class RobotMain(object):
 
         cv2.destroyWindow("Camera Frame Precision")
 
+    # Centers the grabber where the camera currently is
     def center_grabber(self, cap, color_name, orientation, lego_length):
         # Opens the camera and gets frame information
         ret, frame = cap.read()
@@ -258,7 +266,6 @@ class RobotMain(object):
             cv2.putText(frame, f"dx: {dx}px, dy: {dy}px, angle: {angle_passed:.1f} deg",
                         (box_center[0] - 120, box_center[1] + 45),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
             cv2.circle(frame, frame_center, 5, (255, 255, 255), -1)
             cv2.imshow("Camera Frame 2", frame)
             cv2.waitKey(1)
@@ -338,9 +345,8 @@ class RobotMain(object):
         Movement.pprint(
             f"Landing pad dx: {dx_pad:.2f}px, dy: {dy_pad:.2f}px, angle: {pad_angle:.2f}Â°")
 
-        # Centers the camera over the landing pad and then places the grabber in position
+        # Centers the camera over the landing pad
         self.run_precise(cap, "blue")
-        self.center_grabber(cap, "blue", "short-ways", 47.7)
 
         # If the pad could be found, return True, otherwise, return False
         if pad_contour.any():
@@ -349,6 +355,7 @@ class RobotMain(object):
             vision_control.pprint("No landing pad found â€” skipping placement.")
             return False
 
+    # Loops through and places each lego on the pad
     def place_all_legos(self, cap):
         # Reads the frame and formats it to find contours
         ret, frame = cap.read()
@@ -396,7 +403,7 @@ class RobotMain(object):
                 if pad_centered:
                     lego_number += 1
                     vision_control.pprint(f"Lego number: {lego_number}")
-                    self.place_lego(lego_number)
+                    self.place_lego(cap, lego_number)
 
     def run(self):
         # z absolute distance to picking up range is 203.9mm
@@ -428,6 +435,7 @@ class RobotMain(object):
             # self._arm.release_state_changed_callback(self._state_changed_callback)
             # if hasattr(self._arm, 'release_count_changed_callback'):
             #         self._arm.release_count_changed_callback(self._count_changed_callback)
+
 if __name__ == '__main__':
     Movement.pprint('xArm-Python-SDK Version:{}'.format(version.__version__)) # FIX: Call Movement.pprint
     robot_main = RobotMain(arm)
