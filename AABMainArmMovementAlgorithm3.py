@@ -10,6 +10,7 @@ from xarm.wrapper import XArmAPI
 from movement import Movement
 import vision_control
 from vision_utils import COLOR_RANGES, get_mask_and_contours
+from pad_manager import PadManager
 
 # first connect, i see that this was done at the bottom of the code as well, will review necessity.
 arm = XArmAPI('192.168.1.207', baud_checkset=False)
@@ -22,8 +23,9 @@ class RobotMain(object):
         self._arm = arm
         self.movement = Movement(arm)
         # REMOVED: self.vision = Vision_control() # <--- NOW CORRECTLY REMOVED
-        self._tcp_speed = 50
+        self._tcp_speed = 70
         self.is_alive = True
+        self.pad_manager = PadManager(6, 16, 0, self.movement)
 
     # Moves the camera a decided amount based on pixel to mm ratio and lowers the grabber
     def center_x_y_general(self, dx, dy, ratio, angle, adder_1, adder_2, threshold=5):
@@ -47,14 +49,14 @@ class RobotMain(object):
         time.sleep(0.5)
 
     # Moves the camera a decided amount based on pixel to mm ratio, and moves the grabber to previous camera location
-    def center_x_y_precise(self, dx, dy, ratio, angle, threshold=2):
+    def center_x_y_precise(self, dx, dy, ratio, angle, threshold=.5):
         if abs(dx) > threshold:
-            x_move = dx*ratio + math.sin(abs(angle)) * ratio
+            x_move = dx*ratio + math.cos(abs(angle)) * ratio
         else:
             x_move = 0
 
         if abs(dy) > threshold:
-            y_move = -dy*ratio + math.cos(abs(angle)) * ratio
+            y_move = -dy*ratio + math.sin(abs(angle)) * ratio
         else:
             y_move = 0
 
@@ -65,11 +67,11 @@ class RobotMain(object):
 
 
 
-        self.movement.move_wherever(x_move+5, y_move+54, 0,0,0, yaw_move)
+        self.movement.move_wherever(x_move+4, y_move+54, 0,0,0, yaw_move)
         time.sleep(0.5)
 
     # Moves the camera a small amount in the given direction based on pixel length only
-    def center_x_y_simple(self, dx, dy, threshold = 1):
+    def center_x_y_simple(self, dx, dy, threshold = .5):
         if abs(dx) > threshold:
             x_move = dx * .1
         else:
@@ -82,6 +84,15 @@ class RobotMain(object):
 
         # FIX: Call on movement instance
         self.movement.move_wherever(x_move, y_move, 0,0,0, 0)
+
+    # This function is calibrated to account for imprecisions based on data storage limitations
+    def normalize_pad(self, dx, dy, angle):
+        if dy < 0:
+            self.movement.move_up(2)
+            self.movement.move_left(1)
+        else:
+            self.movement.move_down(2)
+            self.movement.move_right(1)
 
     # This function centers precisely on the contour, bringing down disparity between the centers of the contour and camera as low as possible
     def dynamic_center_increment(self, contour, cap):
@@ -113,7 +124,7 @@ class RobotMain(object):
         cv2.waitKey(1)
 
         # When the dx and dy values are too large, robot recenters and returns False so outer function knows it is not ready yet
-        if abs(dx) > 1 or abs(dy) > 1:
+        if abs(dx) > .5 or abs(dy) > .5:
             self.center_x_y_simple(dx, dy)
             return False
         # When the dx and dy values are small enough, it exits the function and returns True so the outer program can move on
@@ -123,7 +134,7 @@ class RobotMain(object):
             return True
 
     # Places the lego on the landing pad in the center of the pad.
-    def place_lego(self, lego_number):
+    def place_lego(self, cap, lego_number):
         # Identifies the additional height needed to place the lego in the correct spot
         height_added_to_z = 21 + (lego_number - 1) * 9.6  # was 18 and 9.6mm
 
@@ -215,6 +226,7 @@ class RobotMain(object):
 
         cv2.destroyWindow("Camera Frame Precision")
 
+    # Centers the grabber where the camera currently is
     def center_grabber(self, cap, color_name, orientation, lego_length):
         # Opens the camera and gets frame information
         ret, frame = cap.read()
@@ -259,7 +271,6 @@ class RobotMain(object):
             cv2.putText(frame, f"dx: {dx}px, dy: {dy}px, angle: {angle_passed:.1f} deg",
                         (box_center[0] - 120, box_center[1] + 45),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
             cv2.circle(frame, frame_center, 5, (255, 255, 255), -1)
             cv2.imshow("Camera Frame 2", frame)
             cv2.waitKey(1)
@@ -273,7 +284,7 @@ class RobotMain(object):
         # Uses the camera to identify the lego position
         if not cap.isOpened():
             Movement.pprint("Error: Could not open camera.")
-            return
+            return None
         _, frame = cap.read()
 
         # Adds a circle to the frame at the center of the picture
@@ -339,17 +350,23 @@ class RobotMain(object):
         Movement.pprint(
             f"Landing pad dx: {dx_pad:.2f}px, dy: {dy_pad:.2f}px, angle: {pad_angle:.2f}Â°")
 
-        # Centers the camera over the landing pad and then places the grabber in position
+        # Centers the camera over the landing pad
         self.run_precise(cap, "blue")
-        self.center_grabber(cap, "blue", "short-ways", 47.7)
+
+        # Centers the grabber over the landing pad
+        self.center_grabber(cap, "blue", "short-ways", 127.8)
+
+        self.normalize_pad(dx_pad, dy_pad, pad_angle)
 
         # If the pad could be found, return True, otherwise, return False
         if pad_contour.any():
+            #self.pad_manager.set_angle(pad_angle)
             return True
         else:
             vision_control.pprint("No landing pad found â€” skipping placement.")
             return False
 
+    # Loops through and places each lego on the pad
     def place_all_legos(self, cap):
         # Reads the frame and formats it to find contours
         ret, frame = cap.read()
@@ -397,7 +414,11 @@ class RobotMain(object):
                 if pad_centered:
                     lego_number += 1
                     vision_control.pprint(f"Lego number: {lego_number}")
-                    self.place_lego(lego_number)
+                    #self.place_lego(cap, lego_number)
+                    self.pad_manager.set_current_lego(4, 2, "short-ways")
+                    self.movement.pprint("Please input the coordinates in this format: x, y")
+                    x_coord, y_coord = input().split(", ")
+                    self.pad_manager.set_coordinates(int(x_coord), int(y_coord))
 
     def run(self):
         # z absolute distance to picking up range is 203.9mm
@@ -429,6 +450,7 @@ class RobotMain(object):
             # self._arm.release_state_changed_callback(self._state_changed_callback)
             # if hasattr(self._arm, 'release_count_changed_callback'):
             #         self._arm.release_count_changed_callback(self._count_changed_callback)
+
 if __name__ == '__main__':
     Movement.pprint('xArm-Python-SDK Version:{}'.format(version.__version__)) # FIX: Call Movement.pprint
     robot_main = RobotMain(arm)
