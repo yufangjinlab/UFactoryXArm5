@@ -11,7 +11,7 @@ class Movement:
         self.alive = True
         self._arm = robot
         self._tcp_speed = 80
-        self._arm.set_gripper_speed(1000)
+        self._arm.set_gripper_speed(1500)
         self._tcp_acc = 2000
         self._angle_speed = 20
         self._angle_acc = 500
@@ -143,6 +143,8 @@ class Movement:
         self._arm.set_gripper_enable(True)
         self._arm.set_gripper_position(0, wait=True)
 
+    def set_tcp_speed(self, speed):
+        self._tcp_speed = speed
 
     # feeds ratio to center_robotxy for single-movement
     def ratio_of_lego_pixel_to_mm(self, pixel_length, real_length_mm=31.8):

@@ -86,13 +86,16 @@ class RobotMain(object):
         self.movement.move_wherever(x_move, y_move, 0,0,0, 0)
 
     # This function is calibrated to account for imprecisions based on data storage limitations
-    def normalize_pad(self, dx, dy, angle):
+    def normalize_pad(self, dx, dy, orientation):
         if dy < 0:
             self.movement.move_up(2)
             self.movement.move_left(1)
         else:
             self.movement.move_down(2)
             self.movement.move_right(1)
+
+        if orientation == "long-ways":
+            self.movement.move_right(2)
 
     # This function centers precisely on the contour, bringing down disparity between the centers of the contour and camera as low as possible
     def dynamic_center_increment(self, contour, cap):
@@ -311,7 +314,7 @@ class RobotMain(object):
         return True
 
     # This function is the centering function for the pad placement, returns whether it was successful
-    def center_on_pad(self, cap):
+    def center_on_pad(self, cap, orientation):
         # Sets the robot to the initial position for taking the picture
         self._arm.set_position(x=206, y=135.8, z=403.9, roll=180, pitch=0, yaw=-88.1, speed=self._tcp_speed,
                                wait=True)
@@ -334,6 +337,8 @@ class RobotMain(object):
                 # Takes position information from the contour rect and draws boxes
                 pad_center, dx_pad, dy_pad, _, _, pad_angle = vision_control.unpack_rect(contour, frame)
                 pad_contour = contour
+                if vision_control.measure_lego_angle(pad_contour) > 0:
+                    pad_angle -= 90
 
                 # Prints pad location information
                 vision_control.pprint(
@@ -354,13 +359,14 @@ class RobotMain(object):
         self.run_precise(cap, "blue")
 
         # Centers the grabber over the landing pad
-        self.center_grabber(cap, "blue", "short-ways", 127.8)
+        self.center_grabber(cap, "blue", orientation, 127.8)
 
-        self.normalize_pad(dx_pad, dy_pad, pad_angle)
+        self.normalize_pad(dx_pad, dy_pad, orientation)
 
         # If the pad could be found, return True, otherwise, return False
         if pad_contour.any():
-            #self.pad_manager.set_angle(pad_angle)
+            Movement.pprint(pad_angle)
+            self.pad_manager.set_angle(pad_angle)
             return True
         else:
             vision_control.pprint("No landing pad found â€” skipping placement.")
@@ -387,12 +393,17 @@ class RobotMain(object):
                 if cv2.contourArea(contour) < 500 or cv2.contourArea(contour) > 1000:
                     continue
 
+                self.movement.pprint("Please input the coordinates in this format: x, y")
+                x_coord, y_coord = input().split(", ")
+                self.movement.pprint("Orient lego long-ways or short-ways?")
+                orientation = input()
+
                 # Sets the arm to picture taking position.  Does not take picture at this point.
                 self._arm.set_position(x=-72.9, y=259.5, z=603.9, roll=180, pitch=0, yaw=-88.1,
                                        speed=self._tcp_speed, wait=True)
 
                 # Finds rough location of current lego and then centers on it
-                found_lego = self.find_lego(contour, cap)
+                self.find_lego(contour, cap)
                 self.run_precise(cap, color_name)
                 time.sleep(1)
                 vision_control.pprint("Ran self.run_precise()")
@@ -408,16 +419,14 @@ class RobotMain(object):
                 movement.close_gripper()
 
                 # Saves whether the grabber was successfully centered on the pad
-                pad_centered = self.center_on_pad(cap)
+                pad_centered = self.center_on_pad(cap, orientation)
 
                 # If the pad was successfully centered on, place_lego is called to actually place down the lego
                 if pad_centered:
                     lego_number += 1
                     vision_control.pprint(f"Lego number: {lego_number}")
                     #self.place_lego(cap, lego_number)
-                    self.pad_manager.set_current_lego(4, 2, "short-ways")
-                    self.movement.pprint("Please input the coordinates in this format: x, y")
-                    x_coord, y_coord = input().split(", ")
+                    self.pad_manager.set_current_lego(4, 2, orientation)
                     self.pad_manager.set_coordinates(int(x_coord), int(y_coord))
 
     def run(self):

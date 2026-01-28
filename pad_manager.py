@@ -27,7 +27,10 @@ class PadManager:
 
     # Sets the angle that the pad is at currently
     def set_angle(self, angle):
-        self.angle = angle
+        self.angle = angle * math.pi / 180
+
+    def get_angle(self):
+        return self.angle
 
     # Width is considered to be the short side of the standard pad (6 studs)
     def set_width_and_length(self, width, length):
@@ -46,14 +49,16 @@ class PadManager:
     # In a given scenario of the pad tilted towards the robot from the landing strip, this should work
     # This moves the grabber the given number of studs in the y direction
     def move_pad_y(self, amount):
-        x_movement = amount * math.sin(self.angle) * 8
+        x_movement = amount * -math.sin(self.angle) * 8
         y_movement = amount * math.cos(self.angle) * 8
+        print(f"Y: {x_movement}, {y_movement}")
         self.movement.move_wherever(x_movement, y_movement, 0, 0, 0, 0)  # places the arm based on the calculated values
 
     # Moves the grabber the given number of studs in the x direction
     def move_pad_x(self, amount):
-        x_movement = amount * math.sin(90 - self.angle) * 8
-        y_movement = -amount * math.cos(90 - self.angle) * 8
+        x_movement = amount * math.cos(self.angle) * 8
+        y_movement = amount * -math.sin(self.angle) * 8
+        print(f"X: {x_movement}, {y_movement}")
         self.movement.move_wherever(x_movement, y_movement, 0, 0, 0, 0)
 
     # Coordinates are based in the center of the pad
