@@ -27,7 +27,7 @@ class PadManager:
 
     # Sets the angle that the pad is at currently
     def set_angle(self, angle):
-        self.angle = angle * math.pi / 180
+        self.angle = angle * math.pi / 180 + math.pi / 2
 
     def get_angle(self):
         return self.angle
@@ -71,6 +71,7 @@ class PadManager:
         if pad_height >= 0:
             self.place_lego(pad_height)
             self.set_height_values(x_coord + self.center[0], y_coord + self.center[1], pad_height)
+            print(self.lego_heights)
             return True
         else:
             return False
@@ -100,8 +101,10 @@ class PadManager:
         # Test height, height area, and offsets are recorded to ensure that the location affected contains a stable landing surface
         test_height = self.lego_heights[x_coord, y_coord]
         test_height_area = 0
-        lego_width_offset = self.current_lego_width // 2
+        lego_width_offset = self.current_lego_width // 2 # Offset is used to determine the edge of the lego
         lego_length_offset = self.current_lego_length // 2
+        x_starting_point = x_coord - lego_width_offset # sStarting point provides the coordinates of the edge of the lego that is iterated over
+        y_starting_point = y_coord - lego_length_offset
 
         # Loops through the affected area, checking the height against the test height, which is always set to the largest magnitude height detected
         # If the coordinates are invalid, an exception is thrown
@@ -109,18 +112,18 @@ class PadManager:
             for j in range(self.current_lego_length):
                 try:
                     if self.current_lego_orientation == "short-ways":
-                        if self.lego_heights[x_coord - lego_width_offset + i, y_coord - lego_length_offset + j] > test_height:
+                        if self.lego_heights[x_starting_point + i, y_starting_point + j] > test_height:
                             test_height = self.lego_heights[x_coord - 2 + i, y_coord - 1 + j]
                             test_height_area = 0
-                        elif self.lego_heights[x_coord - lego_width_offset + i, y_coord - lego_length_offset + j] == test_height:
+                        elif self.lego_heights[x_starting_point + i, y_starting_point + j] == test_height:
                             test_height_area = test_height_area + 1
                     else:
                         if self.lego_heights[
-                            x_coord - lego_length_offset + j, y_coord - lego_width_offset + i] > test_height:
+                            x_starting_point + j, y_starting_point + i] > test_height:
                             test_height = self.lego_heights[x_coord - 1 + j, y_coord - 2 + i]
                             test_height_area = 0
                         elif self.lego_heights[
-                            x_coord - lego_length_offset + j, y_coord - lego_width_offset + i] == test_height:
+                            x_starting_point + j, y_starting_point + i] == test_height:
                             test_height_area = test_height_area + 1
                 except:
                     self.movement.pprint("The coordinates provided are invalid")

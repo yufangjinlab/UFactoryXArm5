@@ -87,15 +87,17 @@ class RobotMain(object):
 
     # This function is calibrated to account for imprecisions based on data storage limitations
     def normalize_pad(self, dx, dy, orientation):
-        if dy < 0:
-            self.movement.move_up(2)
-            self.movement.move_left(1)
-        else:
-            self.movement.move_down(2)
-            self.movement.move_right(1)
+        if orientation == "short-ways":
+            if dy < 0:
+                self.movement.move_up(1)
+                self.movement.move_left(1)
+            else:
+                self.movement.move_down(1)
+                self.movement.move_right(1)
 
         if orientation == "long-ways":
             self.movement.move_right(2)
+            self.movement.move_down(3)
 
     # This function centers precisely on the contour, bringing down disparity between the centers of the contour and camera as low as possible
     def dynamic_center_increment(self, contour, cap):
