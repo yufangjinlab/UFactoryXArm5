@@ -55,19 +55,31 @@ class yolo_model():
         color_results = []
 
         for result in self.results:
-            for box in result.boxes:
-                if int(box.cls) == self.classes[color]:
-                    color_results += box
+            class_ids = result.boxes.cls.tolist()
+
+            masks_data = result.masks.data.cpu().numpy()
+
+            for i, mask in enumerate(masks_data):
+                class_id = int(class_ids[i])
+                if class_id != self.classes[color]:
+                    color_results.append(result.masks.xy[i].astype(np.int32).reshape(-1, 1, 2))
+
 
         return color_results
 
-    #def plot_color_boxes(self, boxes):
-
-
-
+    def get_mask_center(self, mask):
+        if(len(mask) > 0):
+            center_x = int(np.mean(mask[:, 0, 0]))
+            center_y = int(np.mean(mask[:, 0, 1]))
+            return center_x, center_y
+        else:
+            return None
 
 a = yolo_model('segments(500e Full Augmentations).pt')
-a.get_color_results('Red')
+masks = a.get_color_results('Red')
+for mask in masks:
+    print(a.get_mask_center(mask))
+
 
 class vision_processor():
     def __init__(self, cap, model):
