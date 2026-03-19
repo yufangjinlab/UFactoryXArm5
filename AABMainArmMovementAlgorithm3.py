@@ -11,6 +11,8 @@ from movement import Movement
 import vision_control
 from vision_utils import COLOR_RANGES, get_mask_and_contours
 from pad_manager import PadManager
+import segments_processing
+from segments_processing import yolo_model
 
 # first connect, i see that this was done at the bottom of the code as well, will review necessity.
 arm = XArmAPI('192.168.1.207', baud_checkset=False)
@@ -22,10 +24,10 @@ class RobotMain(object):
     def __init__(self, arm):
         self._arm = arm
         self.movement = Movement(arm)
-        # REMOVED: self.vision = Vision_control() # <--- NOW CORRECTLY REMOVED
         self._tcp_speed = 70
         self.is_alive = True
         self.pad_manager = PadManager(6, 16, 0, self.movement)
+        self.model = yolo_model("segments(500e Full Augmentations).pt")
 
     # Moves the camera a decided amount based on pixel to mm ratio and lowers the grabber
     def center_x_y_general(self, dx, dy, ratio, angle, adder_1, adder_2, threshold=5):
@@ -106,9 +108,8 @@ class RobotMain(object):
             Movement.pprint("Error: Could not open camera.")
             return
         _, frame = cap.read()
-
         # Unpacks the rect values for later use
-        box_center, dx, dy, w, h, _ = vision_control.unpack_rect(contour, frame)
+        box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(contour, frame)
 
         # Sorts the pixel differences so they can be displayed
         pixel_length = max(w, h)
@@ -120,7 +121,7 @@ class RobotMain(object):
         )
 
         # Draws visuals on the screen
-        frame_center = vision_control.get_frame_center(frame)
+        frame_center = segments_processing.get_frame_center(frame)
         cv2.circle(frame, box_center, 5, (0, 0, 255), -1)
         cv2.putText(frame, f"dx: {dx}px, dy: {dy}px", (box_center[0] - 60, box_center[1] + 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
@@ -183,7 +184,7 @@ class RobotMain(object):
 
     # Moves the camera so that it is directly over the lego it is looking to place on the pad by color
     def run_precise(self, cap, target_color):
-        # Checks to ensure that the camera is functional
+        time.sleep(1) # Checks to ensure that the camera is functional
         if not cap.isOpened():
             Movement.pprint("Error: Could not open camera.")
             return
@@ -229,7 +230,7 @@ class RobotMain(object):
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
 
-        cv2.destroyWindow("Camera Frame Precision")
+        #cv2.destroyWindow("Camera Frame Precision")
 
     # Centers the grabber where the camera currently is
     def center_grabber(self, cap, color_name, orientation, lego_length):
@@ -238,7 +239,7 @@ class RobotMain(object):
         if not ret:
             vision_control.pprint("Failed to grab frame after run_precise().")
             return
-        frame_center = vision_control.get_frame_center(frame)
+        frame_center = segments_processing.get_frame_center(frame)
 
         # Gets contour information from the frame
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -252,7 +253,7 @@ class RobotMain(object):
                 continue
 
             # Unpacks rect information
-            box_center, dx, dy, w, h, _ = vision_control.unpack_rect(new_contour, frame)
+            box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(new_contour, frame)
             # Sort dimensions
             pixel_length = max(w, h)
             pixel_width = min(w, h)
@@ -262,7 +263,7 @@ class RobotMain(object):
                 f"Lego Center 2: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px")
 
             # Detects the angle of the contour so it can be grabbed
-            angle_passed = vision_control.measure_lego_angle(new_contour)
+            angle_passed = segments_processing.measure_lego_angle(new_contour)
 
             # If the orientation of the grabber is short ways, it will modify the angle such that is places the lego in the correct orientation
             if orientation == "short-ways":
@@ -293,13 +294,13 @@ class RobotMain(object):
         _, frame = cap.read()
 
         # Adds a circle to the frame at the center of the picture
-        frame_center = vision_control.get_frame_center(frame)
+        frame_center = segments_processing.get_frame_center(frame)
         cv2.circle(frame, frame_center, 5, (255, 255, 255), -1)
         cv2.imshow("Camera Frame 1", frame)
         cv2.waitKey(1)
 
         # Unpack values from rect to identify centers and movement requirements
-        box_center, dx, dy, w, h, _ = vision_control.unpack_rect(contour, frame)
+        box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(contour, frame)
 
         # Sort dimensions
         pixel_length = max(w, h)
@@ -317,13 +318,16 @@ class RobotMain(object):
 
     # This function is the centering function for the pad placement, returns whether it was successful
     def center_on_pad(self, cap, orientation):
-        # Sets the robot to the initial position for taking the picture
+        # Sets the robot to the initial position for taking the picture.
         self._arm.set_position(x=206, y=135.8, z=403.9, roll=180, pitch=0, yaw=-88.1, speed=self._tcp_speed,
                                wait=True)
 
         # Detect Blue Landing Pad (used as destination)
         time.sleep(1)
-        frame, contours_blue, _ = vision_control.detect_blue_objects(cap)
+        _, frame = cap.read()
+        print("test read 2")
+        pad_masks = self.model.get_color_results('Pad')
+        #frame, contours_blue, _ = vision_control.detect_blue_objects(cap)
 
         # Save position information so it can be displayed at the end
         pad_pixel_width = 0
@@ -333,25 +337,23 @@ class RobotMain(object):
         pad_angle = 0
 
         # This loops looks through the blue contours to find the pad. Only the pad contour is used
-        for contour in contours_blue:
-            area = cv2.contourArea(contour)
-            if area > 1500:
-                # Takes position information from the contour rect and draws boxes
-                pad_center, dx_pad, dy_pad, _, _, pad_angle = vision_control.unpack_rect(contour, frame)
-                pad_contour = contour
-                if vision_control.measure_lego_angle(pad_contour) > 0:
-                    pad_angle -= 90
+        for mask in pad_masks:
+            # Takes position information from the contour rect and draws boxes
+            pad_center, dx_pad, dy_pad, _, _, pad_angle = segments_processing.unpack_rect(mask, frame)
+            pad_contour = mask
+            if segments_processing.measure_lego_angle(pad_contour) > 0:
+                pad_angle -= 90
 
-                # Prints pad location information
-                vision_control.pprint(
+            # Prints pad location information
+            vision_control.pprint(
                     f"Landing pad center: ({pad_center[0]:.2f}, {pad_center[1]:.2f}), angle: {pad_angle:.2f}, pixel length: {pad_pixel_width:.2f}")
 
-                cv2.imshow("Landing Pad", frame)
-                cv2.waitKey(1)
-                time.sleep(1)
+            cv2.imshow("Landing Pad", frame)
+            cv2.waitKey(1)
+            time.sleep(1)
 
-                # Only uses the first large contour found
-                break
+            # Only uses the first large contour found
+            break
 
         # Prints landing pad location information
         Movement.pprint(
@@ -366,7 +368,7 @@ class RobotMain(object):
         self.normalize_pad(dx_pad, dy_pad, orientation)
 
         # If the pad could be found, return True, otherwise, return False
-        if pad_contour.any():
+        if pad_contour is not None:
             Movement.pprint(pad_angle)
             self.pad_manager.set_angle(pad_angle)
             return True
