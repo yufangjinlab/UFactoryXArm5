@@ -41,6 +41,7 @@ def measure_lego_angle(contour):
     time.sleep(1)
 
     return best_angle
+
 def detect_blue_objects(cap):
     ret, frame = cap.read()
     if not ret:

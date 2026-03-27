@@ -65,31 +65,31 @@ def filter_contours_by_sv(contours, hsv, min_area=500, min_s=120, min_v=90):
 
 # HSV color ranges and comments
 COLOR_RANGES = {
-    "red": {
+    "Red": {
         "lower": [np.array([0, 100, 100]), np.array([160, 100, 100])],
         "upper": [np.array([10, 255, 255]), np.array([179, 255, 255])],
         "dual_range": True,
         "comment": "Red â€” needs dual range due to hue wrapping"
     },
-    "lime": {
+    "Lime": {
         "lower": np.array([27, 99, 78]),
         "upper": np.array([71, 255, 255]),
         "dual_range": False,
         "comment": "Lime green"
     },
-    "dark_green": {
+    "Green": {
         "lower": np.array([40, 40, 40]),
         "upper": np.array([104, 255, 220]),
         "dual_range": False,
         "comment": "Dark green"
     },
-    "yellow": {
+    "Yellow": {
         "lower": np.array([19, 120, 104]),
         "upper": np.array([29, 255, 255]),
         "dual_range": False,
         "comment": "Yellow"
     },
-    "blue": {
+    "Blue": {
         "lower": np.array([100, 125, 100]),
         "upper": np.array([133, 255, 255]),
         "dual_range": False,
