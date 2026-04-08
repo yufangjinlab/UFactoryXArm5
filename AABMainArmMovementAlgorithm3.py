@@ -103,14 +103,15 @@ class RobotMain(object):
             self.movement.move_down(3)
 
     # This function centers precisely on the contour, bringing down disparity between the centers of the contour and camera as low as possible
-    def dynamic_center_increment(self, contour):
+    def dynamic_center_increment(self, mask):
         # Uses the frame from the current position to identify the location of the lego
         if not self.cap.isOpened():
             Movement.pprint("Error: Could not open camera.")
             return
         _, frame = self.cap.read()
+
         # Unpacks the rect values for later use
-        box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(contour, frame)
+        box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(mask, frame)
 
         # Sorts the pixel differences so they can be displayed
         pixel_length = max(w, h)
@@ -202,8 +203,8 @@ class RobotMain(object):
                 break
 
             # Retrieves a list of all contours in the current frame
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-            color_contours = self.get_all_color_contours(hsv)
+            #hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            #color_contours = self.get_all_color_contours(hsv)
             #found_valid_mask = False  # track if we processed anything
 
             color_masks = self.model.get_color_results(target_color)
@@ -260,18 +261,20 @@ class RobotMain(object):
         frame_center = segments_processing.get_frame_center(frame)
 
         # Gets contour information from the frame
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        color_contours = self.get_all_color_contours(hsv)
+        #hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        #color_contours = self.get_all_color_contours(hsv)
         vision_control.pprint(color_name)
 
+        masks = self.model.get_color_results(color_name)
+
         # Searches the contours in the list of contours of the given color
-        for new_contour in color_contours[color_name]:
+        for mask in masks:
             # Disregards contours that are too small
-            if cv2.contourArea(new_contour) < 500:
+            if cv2.contourArea(mask) < 500:
                 continue
 
             # Unpacks rect information
-            box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(new_contour, frame)
+            box_center, dx, dy, w, h, _ = segments_processing.unpack_rect(mask, frame)
             # Sort dimensions
             pixel_length = max(w, h)
             pixel_width = min(w, h)
@@ -281,7 +284,7 @@ class RobotMain(object):
                 f"Lego Center 2: {box_center} | dx: {dx}px, dy: {dy}px | length: {pixel_length:.1f}px, width: {pixel_width:.1f}px")
 
             # Detects the angle of the contour so it can be grabbed
-            angle_passed = segments_processing.measure_lego_angle(new_contour)
+            angle_passed = segments_processing.measure_lego_angle(mask)
 
             # If the orientation of the grabber is short ways, it will modify the angle such that is places the lego in the correct orientation
             if orientation == "short-ways":
@@ -380,7 +383,7 @@ class RobotMain(object):
         self.run_precise("Pad")
 
         # Centers the grabber over the landing pad
-        self.center_grabber("Blue", orientation, 127.8)
+        self.center_grabber("Pad", orientation, 127.8)
 
         self.normalize_pad(dx_pad, dy_pad, orientation)
 
@@ -399,33 +402,40 @@ class RobotMain(object):
         ret, frame = self.cap.read()
         if not ret:
             return
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # Finds a list of all the contours in the frame
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         color_contours = self.get_all_color_contours(hsv)
-
+        result = self.model.get_results()
+        masks = self.model.reshape_masks(result[0].masks)
         # Initializes the legos at zero so that heights can be adjusted
         lego_number = 0
 
         # Loops through each color and uses the contours to place the legos
-        for color_name, contours in color_contours.items():
-            for contour in contours:
-                # Ignores contours that are too large or too small to be legos
-                if cv2.contourArea(contour) < 500 or cv2.contourArea(contour) > 1000:
-                    continue
+        while len(masks) > 0:
+            self.movement.pprint("Please input the coordinates in this format: x, y")
+            x_coord, y_coord = input().split(", ")
+            self.movement.pprint("Orient lego long-ways or short-ways?")
+            orientation = input()
+            self.movement.pprint("Color of lego to be selected:")
+            color = input()
 
-                self.movement.pprint("Please input the coordinates in this format: x, y")
-                x_coord, y_coord = input().split(", ")
-                self.movement.pprint("Orient lego long-ways or short-ways?")
-                orientation = input()
+            for i in range(len(masks)):
+                mask = masks[i]
+                box = result[0].boxes[i]
+                # Ignores contours that are too large or too small to be lego
+                if self.model.get_color(box) != color:
+                    continue
+                if cv2.contourArea(mask) < 500:
+                    continue
 
                 # Sets the arm to picture taking position.  Does not take picture at this point.
                 self._arm.set_position(x=-72.9, y=259.5, z=603.9, roll=180, pitch=0, yaw=-88.1,
                                        speed=self._tcp_speed, wait=True)
 
                 # Finds rough location of current lego and then centers on it
-                self.find_lego(contour)
-                self.run_precise(color_name)
+                self.find_lego(mask)
+                self.run_precise(color)
                 time.sleep(1)
                 vision_control.pprint("Ran self.run_precise()")
 
@@ -434,7 +444,7 @@ class RobotMain(object):
                     time.sleep(0.05)
 
                 # Centers the grabber over the lego where the camera was, oriented long-ways, then grabs the lego
-                self.center_grabber(color_name, "long-ways", 31.8)
+                self.center_grabber(color, "long-ways", 31.8)
                 movement.move_downz(150)
                 movement.close_gripper()
 
@@ -448,6 +458,7 @@ class RobotMain(object):
                     #self.place_lego(cap, lego_number)
                     self.pad_manager.set_current_lego(4, 2, orientation)
                     self.pad_manager.set_coordinates(int(x_coord), int(y_coord))
+                    break
 
     def run(self):
         # z absolute distance to picking up range is 203.9mm

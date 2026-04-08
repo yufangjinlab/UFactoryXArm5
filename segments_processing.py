@@ -29,6 +29,16 @@ class yolo_model():
             'Pad' : 5,
             'Red' : 6,
             'Yellow' : 7}
+        self.classes_by_index = {
+            0 : 'Blue',
+            1 : 'Brown',
+            2 : 'Gray',
+            3 : 'Green',
+            4 : 'Lime',
+            5 : 'Pad',
+            6 : 'Red',
+            7 : 'Yellow'}
+
 
     def get_frame(self):
 
@@ -66,6 +76,17 @@ class yolo_model():
                     color_results.append(result.masks.xy[i].astype(np.int32).reshape(-1, 1, 2))
 
         return color_results
+
+    def reshape_masks(self, masks):
+        masks_data = masks.data.cpu().numpy()
+        reshaped_masks = []
+        for i, mask in enumerate(masks_data):
+            reshaped_masks.append(masks.xy[i].astype(np.int32).reshape(-1, 1, 2))
+        return reshaped_masks
+
+    def get_color(self, box):
+        class_id = box.cls
+        return self.classes_by_index[int(class_id)]
 
     def get_mask_center(self, mask):
         if(len(mask) > 0):
